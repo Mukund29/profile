@@ -60,15 +60,17 @@ Subscription: $2.99/month billed annually. Stack: Expo + Supabase + RevenueCat +
 
 ---
 
-## Database Schema (11 Tables)
+## Database Schema (12 Tables)
 
 ```
 auth.users → user_profiles · user_entitlements · bank_connections
            → transactions · categories · goals
            → weekly_summaries · monthly_summaries
-           → parse_queue · parse_failed · audit_log
+           → parse_queue · parse_failed · balance_history · audit_log
 fx_rates (global, no user FK)
 ```
+
+**Key trigger:** `trg_goal_amount` on `transactions` → auto-updates `goals.current_amount` (atomic, same transaction — not an Edge Function).
 
 All monetary amounts: **smallest currency unit** (paise/cents/pence) — never floats.
 
@@ -76,15 +78,16 @@ All monetary amounts: **smallest currency unit** (paise/cents/pence) — never f
 
 ## pg_cron Jobs (7 Scheduled)
 
-| Job | Schedule | Purpose |
-|-----|----------|---------|
-| Balance refresh | Daily 06:00 UTC | Refresh all active bank balances (staggered 50/hr) |
-| Token expiry check | Daily 07:00 UTC | Alert users 7 days before Plaid/TrueLayer token expires |
-| FX rate fetch | Hourly | All currency pairs in one Open Exchange Rates call |
-| Weekly summaries | Monday 08:00 UTC | Compute discipline scores for all users |
-| Monthly summaries | 1st of month 02:00 UTC | Pre-aggregate monthly reports |
-| Queue cleanup | Daily 03:00 UTC | Delete `parse_queue` rows processed > 30 days ago |
-| Re-consent alerts | Daily 09:00 UTC | Alert India users 30 days before Setu AA expiry |
+| Job | Schedule (UTC) | Cron Expression | Purpose |
+|-----|----------------|-----------------|---------|
+| Balance refresh | Daily 06:00 | `0 6 * * *` | Refresh all active bank balances (staggered 50/hr, 2s delay) |
+| Token expiry check | Daily 07:00 | `0 7 * * *` | Alert users 7 days before Plaid/TrueLayer token expires |
+| FX rate fetch | Every 2 hours | `0 */2 * * *` | All currency pairs — 372 calls/mo (free tier: 1,000/mo) |
+| Weekly summaries | Monday 08:00 | `0 8 * * 1` | Compute discipline scores for all users |
+| Monthly summaries | 1st of month 02:00 | `0 2 1 * *` | Pre-aggregate monthly reports |
+| Queue cleanup | Daily 03:00 | `0 3 * * *` | Delete `parse_queue` rows processed > 30 days ago |
+| Re-consent alerts | Daily 09:00 | `0 9 * * *` | Alert India users 30 days before Setu AA expiry |
+| Setu AA pull | Every 4 hours | `0 */4 * * *` | Pull new India transactions (AA has no webhook) |
 
 ---
 

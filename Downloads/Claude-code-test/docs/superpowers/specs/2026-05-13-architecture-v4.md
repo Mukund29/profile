@@ -109,12 +109,15 @@ RevenueCat     PostHog           Open Exchange
 **Cost saving:** 1 API call/bank/day instead of per-tap → Plaid cost ↓75% (~$15/mo vs ~$60/mo)
 
 ### Transaction Sync — Webhook-Driven Async Queue
-- Plaid / TrueLayer webhooks → HMAC-SHA256 verified → `parse_queue` table
-- Setu AA: pg_cron pull every 4 hours
+- Plaid / TrueLayer webhooks → **HMAC-SHA256 verified** (Plaid: `Plaid-Verification` header; TrueLayer: `X-TL-Webhook-Timestamp` + HMAC) → `parse_queue` table
+- RevenueCat webhooks → **Authorization header with shared secret verified** (RevenueCat uses bearer token auth, not HMAC — Edge Function checks `Authorization: Bearer <RC_WEBHOOK_SECRET>`) → entitlement update
+- Setu AA: pg_cron pull every 4 hours (8th cron job)
 - SMS (Android): on-device parse → structured output → `parse_queue`
-- Python FastAPI polls queue every 30s, max 3 retries with exponential backoff
-- If parser down: queue builds, drains on recovery. Zero data loss.
+- Python FastAPI polls queue every 30s in **batches of 50** (not 10 — throughput fix: 1,000 users × 30 txns/day = 1,250/hr = 21/min; batch-10 at 30s intervals = 20/min capacity which breaks at ~1,500 users; batch-50 gives 100/min headroom to ~7,000 users)
+- If parser down: queue builds, drains on recovery. Zero data loss (UNIQUE constraints prevent duplicates on replay).
 - Push notification on new transaction: "₹450 at Uber — tap to confirm"
+
+**RevenueCat webhook security (CRITICAL):** The Edge Function handling RevenueCat events MUST verify the `Authorization: Bearer` header against `RC_WEBHOOK_SECRET` (set in Supabase Edge Function secrets). Without this check, any HTTP client can POST fake subscription events and grant themselves premium entitlement.
 
 ### Transaction Deduplication
 - Provider transactions (Plaid/TrueLayer/AA): `provider_txn_id` UNIQUE constraint
@@ -154,11 +157,13 @@ RevenueCat     PostHog           Open Exchange
 |-------|-----------|
 | On-device | Expo SecureStore (iOS Keychain / Android Keystore) for auth tokens |
 | SMS data | Parsed on-device — raw SMS never transmitted |
-| In transit | TLS 1.3 enforced · Certificate pinning on mobile |
+| In transit | TLS 1.3 enforced · **Public key pinning (SPKI)** on mobile — NOT certificate pinning |
 | Bank tokens | Supabase Vault (AES-256-GCM) — server-side only |
 | PII (DOB) | Encrypted column in Supabase Vault |
 | At rest | Supabase default AES-256 + SOC2 Type II |
 | Audit | Every token access logged with timestamp + IP |
+
+**Certificate pinning implementation note:** Pin to Supabase's **Subject Public Key Info (SPKI)** hash, not the leaf certificate. Supabase rotates TLS certificates periodically — pinning to a leaf cert causes a production outage for all mobile clients until a forced app update. SPKI pinning survives certificate rotation as long as the public key doesn't change. Use `react-native-ssl-pinning` with SPKI hashes. Store 2 backup hashes (current + next expected) to allow zero-downtime key rotation.
 
 ### Compliance
 | Standard | Requirement | Implementation |
@@ -193,19 +198,26 @@ RevenueCat     PostHog           Open Exchange
 
 **Scale inflection:** Architecture holds to ~50,000 users. Upgrade path: Supabase Team tier → read replica → Python parser async queue (Redis + Celery). No structural rewrite.
 
+**TrueLayer polling cost (UK):** 4 polls/day × avg 0.4 connections × 200 UK users = 320 API calls/day = ~9,600/month. TrueLayer free developer tier: 500 calls/month — **this is exceeded at ~35 UK users**. Must onboard to TrueLayer paid plan before UK launch (~£200/mo flat or per-call pricing). Factor into UK launch budget.
+
 ---
 
 ## pg_cron Job Schedule
 
 | Cron | Time (UTC) | Job |
 |------|-----------|-----|
-| `0 0 * * *` | 00:00 daily | Balance refresh trigger (batched 50/hr, staggered) |
-| `30 0 * * *` | 00:30 daily | Token expiry check + staggered refresh |
-| `0 * * * *` | Every hour | FX rate refresh (Open Exchange Rates) |
-| `0 1 * * 1` | Mon 01:00 | Weekly summary compute |
+| `0 6 * * *` | 06:00 daily | Balance refresh trigger (batched 50/hr, staggered 2s delay) |
+| `0 7 * * *` | 07:00 daily | Token expiry check → refresh tokens expiring within 7 days |
+| `0 */2 * * *` | Every 2 hours | FX rate refresh (Open Exchange Rates — keeps calls ≤ 372/mo, well within 1,000/mo free tier) |
+| `0 8 * * 1` | Mon 08:00 UTC | Weekly summary compute (all users with prior-week transactions) |
 | `0 2 1 * *` | 1st of month 02:00 | Monthly summary compute |
 | `0 3 * * *` | 03:00 daily | parse_queue cleanup (processed rows > 30 days) |
-| `0 4 * * *` | 04:00 daily | Bank re-consent check → push notifications |
+| `0 9 * * *` | 09:00 daily | Bank re-consent check → push Setu AA expiry alerts 30 days before |
+| `0 */4 * * *` | Every 4 hours | Setu AA transaction pull (India users; no webhook support) |
+
+**Note:** 8 pg_cron jobs total. Balance refresh (06:00) and token refresh (07:00) are intentionally staggered 1h apart to avoid concurrent DB load. FX changed from hourly to every-2h: INR/USD/GBP rates are stable enough; this halves API calls to 372/month (free tier ceiling: 1,000).
+
+**Failure alerting:** All pg_cron jobs must write a completion row to a `cron_health` log table (job_name, ran_at, status, rows_affected). Supabase Logflare alert fires if any job has no completion row within 30 minutes of its scheduled time.
 
 ---
 
@@ -227,6 +239,75 @@ Setu deep link → AA consent app (Finvu/CAMS)
             └─ iOS → Manual entry
                 "Add transactions manually or connect email"
 ```
+
+---
+
+## Implementation Risk Register
+
+### Risk 1 — ExcelJS on React Native / Hermes Runtime
+**Severity:** CRITICAL before Sprint 10  
+**Problem:** ExcelJS is a Node.js library that uses `Buffer`, `Stream`, and `fs` — none of which exist in React Native's Hermes JS runtime. Direct import will fail at build time.  
+**Fix:** Use **SheetJS (xlsx)** community edition instead — it has explicit React Native / Expo support and Hermes compatibility. Alternatively, use `expo-file-system` with a custom binary writer and ExcelJS with a polyfill shim (higher risk). Validate the chosen library in a standalone Expo Snack **before Sprint 10** (US-035) to avoid late-sprint blockers.  
+**Action:** Create a spike task in Sprint 5 — build a 10-row Excel file on-device and open it in Google Sheets to confirm end-to-end.
+
+### Risk 2 — Weekly Summary Timezone Edge Case
+**Severity:** MAJOR  
+**Problem:** pg_cron weekly summary runs Monday 08:00 UTC. A user in US Pacific (UTC-8) will have their "week" computed at Sunday midnight local time — meaning any Sunday transactions after midnight PST (= Monday 08:00 UTC) are excluded from their weekly summary.  
+**Fix (pragmatic):** Document the boundary clearly in-app: "Weekly scores cover Monday–Sunday UTC." For v1, this is acceptable. For v1.1, add `timezone` field to `user_profiles` and compute summaries in user-local time (requires per-user cron or time-zone-aware aggregation).  
+**Action:** Add "Weekly scores are based on UTC time" disclosure to the weekly report screen (US-031).
+
+### Risk 3 — Dashboard Budget Ring Live Updates
+**Severity:** MAJOR  
+**Problem:** PRD FR-E05 requires the budget donut ring to "update in real-time when new transactions are added." The architecture does not specify the update mechanism for auto-parsed transactions arriving via FastAPI → Supabase.  
+**Fix:** Enable **Supabase Realtime** subscription on `transactions` table (filtered to `user_id = auth.uid()`). When a new confirmed transaction row is inserted (by FastAPI or direct client write), React Query invalidates the budget ring query and re-renders. Configuration:  
+```ts
+supabase
+  .channel('transactions')
+  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transactions',
+      filter: `user_id=eq.${userId}` }, () => queryClient.invalidateQueries(['budget-ring']))
+  .subscribe()
+```
+**Cost:** Supabase Realtime is included in Pro plan. Each active mobile session = 1 Realtime connection. At 1,000 users with ~5% concurrent = 50 connections — well within Pro plan limits.
+
+### Risk 4 — `goals.current_amount` Consistency
+**Severity:** MAJOR  
+**Problem:** US-041 requires `goals.current_amount` to auto-update when a saving transaction with `goal_id` is inserted/edited/deleted. Using an Edge Function for this introduces a race condition: the transaction commits, but if the Edge Function fails, `current_amount` is stale indefinitely.  
+**Fix:** Use a **PostgreSQL trigger** (runs in the same transaction as the transaction write — atomic):  
+```sql
+CREATE OR REPLACE FUNCTION update_goal_amount() RETURNS trigger AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    UPDATE goals SET current_amount = current_amount - OLD.amount_base
+    WHERE id = OLD.goal_id AND OLD.goal_id IS NOT NULL;
+  ELSIF TG_OP = 'INSERT' THEN
+    UPDATE goals SET current_amount = current_amount + NEW.amount_base
+    WHERE id = NEW.goal_id AND NEW.goal_id IS NOT NULL;
+  ELSIF TG_OP = 'UPDATE' THEN
+    UPDATE goals SET current_amount = current_amount
+      - COALESCE(OLD.amount_base, 0) + COALESCE(NEW.amount_base, 0)
+    WHERE id = COALESCE(NEW.goal_id, OLD.goal_id)
+    AND COALESCE(NEW.goal_id, OLD.goal_id) IS NOT NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_goal_amount
+AFTER INSERT OR UPDATE OR DELETE ON transactions
+FOR EACH ROW EXECUTE FUNCTION update_goal_amount();
+```
+Add this trigger to `supabase/migrations/` as a versioned SQL file.
+
+### Risk 5 — FastAPI Service Key Exposure
+**Severity:** MINOR  
+**Problem:** FastAPI on Railway uses the Supabase service key (bypasses RLS) to write transactions and update parse_queue. If Railway environment is compromised, full DB write access is exposed.  
+**Fix:** (1) Restrict Railway service to Supabase IP allowlist where possible. (2) Create a dedicated Supabase role with only INSERT on `transactions`, UPDATE on `parse_queue`, INSERT on `parse_failed` — not full service key. (3) Rotate service key every 90 days; update Railway env var via Railway CLI (automated).
+
+### Risk 6 — parse_queue Double-Processing on FastAPI Crash
+**Severity:** MINOR (mitigated by dedup)  
+**Problem:** FastAPI marks `parse_queue.status = 'processing'`, writes transaction, then marks `status = 'processed'`. If FastAPI crashes after the transaction write but before `status = 'processed'`, the item will be re-polled and re-processed.  
+**Mitigation (already in place):** `dedup_hash` UNIQUE constraint prevents a duplicate transaction row — the second write returns a conflict error (not a crash). FastAPI should treat `UNIQUE constraint violation` on `dedup_hash` as a success (idempotent) and mark the queue item processed.  
+**Action:** Explicitly handle `23505` (PostgreSQL unique violation) in the FastAPI parser as a non-error path.
 
 ---
 
