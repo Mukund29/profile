@@ -22,6 +22,7 @@ auth.users (Supabase managed)
     ├── monthly_summaries      (1:many — pre-aggregated, pg_cron)
     ├── parse_queue            (1:many — async SMS/email parsing buffer)
     ├── parse_failed           (1:many — dead letter queue, 90-day retention)
+    ├── balance_history        (1:many — daily balance snapshots per bank connection, 90-day retention)
     └── audit_log              (1:many — GDPR compliance trail)
 
 fx_rates                       (global — no user FK, hourly refresh)
@@ -127,6 +128,7 @@ fx_rates                       (global — no user FK, hourly refresh)
 | `provider_txn_id` | text | NULLABLE · UNIQUE NULLS NOT DISTINCT · Plaid/TrueLayer/AA canonical dedup ID |
 | `dedup_hash` | text | UNIQUE · SHA-256 of (amount + merchant_normalized + ±30min timestamp + currency) — SMS/email dedup |
 | `notes` | text | NULLABLE · user-entered |
+| `goal_id` | uuid | NULLABLE FK → goals · ⚡ Indexed · set when txn_type = 'saving' and user assigns to a goal |
 | `is_confirmed` | boolean | DEFAULT false for auto-parsed · true for manual · auto-confirmed after 24h |
 | `created_at` | timestamptz | Row insert time |
 
@@ -176,6 +178,33 @@ fx_rates                       (global — no user FK, hourly refresh)
 | `target_date` | date | NULLABLE |
 | `status` | text | 'active' \| 'achieved' \| 'archived' |
 | `created_at` | timestamptz | |
+
+---
+
+### `balance_history`
+**RLS:** User read-only. Written by pg_cron balance refresh job (service key).  
+**Purpose:** Powers the 7-day balance history line chart on Account Detail screen (US-040).  
+**Retention:** 90 days — pg_cron prunes rows older than 90 days daily.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid | PK |
+| `bank_connection_id` | uuid | FK → bank_connections · ⚡ Indexed |
+| `user_id` | uuid | FK → auth.users · ⚡ Indexed (for RLS) |
+| `balance_amount` | bigint | Snapshot balance in smallest currency unit |
+| `balance_currency` | text | ISO 4217 |
+| `recorded_at` | timestamptz | ⚡ Indexed · timestamp of the balance fetch |
+
+**Insert rule:** One row written per bank_connection per pg_cron balance refresh cycle (daily). Manual refresh triggers also write a row.
+
+```sql
+CREATE INDEX idx_bal_hist_conn_time ON balance_history(bank_connection_id, recorded_at DESC);
+```
+
+**Cleanup pg_cron (daily 04:00 UTC):**
+```sql
+DELETE FROM balance_history WHERE recorded_at < NOW() - INTERVAL '90 days';
+```
 
 ---
 
@@ -322,6 +351,12 @@ CREATE UNIQUE INDEX idx_monthly_user_month ON monthly_summaries(user_id, month);
 
 -- FX rate lookup (latest)
 CREATE INDEX idx_fx_base_quote_time ON fx_rates(base, quote, fetched_at DESC);
+
+-- Goal contribution lookup
+CREATE INDEX idx_txn_goal ON transactions(goal_id) WHERE goal_id IS NOT NULL;
+
+-- Balance history (7-day chart on account detail)
+CREATE INDEX idx_bal_hist_conn_time ON balance_history(bank_connection_id, recorded_at DESC);
 
 -- Parser queue polling
 CREATE INDEX idx_queue_status_created ON parse_queue(status, created_at)

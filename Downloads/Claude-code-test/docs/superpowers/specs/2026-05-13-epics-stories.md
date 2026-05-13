@@ -17,7 +17,7 @@
 | E1 | Foundation & Infrastructure | 34 | Sprint 1–2 |
 | E2 | Authentication & Onboarding | 29 | Sprint 2–3 |
 | E3 | Transaction Management | 34 | Sprint 3–4 |
-| E4 | Bank Integration & Auto-Capture | 55 | Sprint 4–7 |
+| E4 | Bank Integration & Auto-Capture | 55 | Sprint 4–7 | *(US-024 split → US-024a 5SP + US-024b 8SP; net unchanged)* |
 | E5 | Budget, Discipline & Reporting | 42 | Sprint 6–8 |
 | E6 | Export & Google Drive | 21 | Sprint 8–9 |
 | E7 | Accounts, Net Worth & Goals | 21 | Sprint 7–8 |
@@ -507,26 +507,42 @@
 
 ---
 
-### US-024 · Android SMS Parsing
+### US-024a · Android SMS Permission & Listener
 **As an** Android user in India  
-**I want** the app to automatically read my bank SMS alerts  
-**So that** transactions are captured without any input from me
+**I want** the app to request SMS access at the right moment and reliably receive bank SMS alerts  
+**So that** the foundation for auto-capture is in place without permission friction
 
-**Story Points:** 13
+**Story Points:** 5
 
 **Acceptance Criteria:**
 - [ ] `READ_SMS` permission requested contextually (after first manual transaction, not at onboarding)
 - [ ] Permission request includes rationale screen: "FinTrack reads bank SMS to auto-log transactions. Raw messages stay on your device."
-- [ ] On-device parsing only: regex patterns for HDFC, ICICI, SBI, Axis, Kotak
-- [ ] Parsed output format: `{amount, merchant, date, currency, type, bank}` — only this sent to server
-- [ ] Raw SMS body never transmitted
-- [ ] Supported message types: debit alert, credit alert, UPI confirmation
-- [ ] Parse accuracy: ≥ 92% on test corpus of 200 messages (per bank)
-- [ ] Failed parses queued to `parse_failed` with raw text for debugging (on-device log; not transmitted)
-- [ ] SMS listener active only in foreground + background (not killed by Android battery optimization; handles Doze mode)
+- [ ] SMS BroadcastReceiver + WorkManager listener active in foreground + background
+- [ ] Handles Android Doze mode — uses `setAndAllowWhileIdle` alarm or high-priority FCM to wake listener
+- [ ] SMS listener triggers on-device parsing pipeline (US-024b) when a message arrives from a known bank sender ID
 - [ ] Play Store SMS_READ declaration + financial app form submitted
+- [ ] Raw SMS body never transmitted to any server at any point
 
 **Dependencies:** US-001, US-003
+
+---
+
+### US-024b · Android SMS Parser — 5-Bank Regex Engine
+**As an** Android user in India  
+**I want** the app to correctly parse debit/credit SMS messages from my bank  
+**So that** transactions are logged automatically with accurate amounts and merchant names
+
+**Story Points:** 8
+
+**Acceptance Criteria:**
+- [ ] On-device regex patterns for HDFC, ICICI, SBI, Axis, Kotak (debit alert, credit alert, UPI confirmation)
+- [ ] Parsed output format: `{amount, merchant, date, currency, type, bank}` — only this sent to server
+- [ ] Parse accuracy: ≥ 92% on test corpus of 200 messages per bank (1,000 total)
+- [ ] Failed parses: on-device log entry written (not transmitted); structured error pushed to `parse_failed` table with error_message only (no raw SMS)
+- [ ] Regex pattern registry versioned in codebase; pattern updates deliverable via app update (no server-side pattern fetch in v1)
+- [ ] Unit tests: corpus test runner validates all 5 banks with green/amber/red accuracy report
+
+**Dependencies:** US-024a
 
 ---
 
@@ -859,12 +875,13 @@
 
 **Acceptance Criteria:**
 - [ ] Account name + current balance
-- [ ] 7-day balance history line chart (from stored `balance_amount` snapshots)
+- [ ] 7-day balance history line chart (queried from `balance_history` table filtered by `bank_connection_id` and last 7 days)
 - [ ] Recent transactions from this account (filtered by `bank_connection_id`)
 - [ ] "Refresh Balance" button (rate-limited)
 - [ ] "Reconnect" CTA shown when `status = 'expired'` — launches provider re-auth flow
 - [ ] "Remove account" (destructive): confirmation dialog → sets `status = 'disconnected'`; does not delete historical transactions
 - [ ] Removing account does not affect Net Worth retroactively (balance removed from total)
+- [ ] If fewer than 7 days of `balance_history` rows exist: chart shows available data with "Partial history" note
 
 **Dependencies:** US-039
 
@@ -881,7 +898,8 @@
 - [ ] "Add Goal" form: name · target amount (base currency) · target date (optional)
 - [ ] Goal list with progress bars (% complete) + days remaining countdown
 - [ ] Goal detail: progress line chart over time, list of transactions contributing to goal
-- [ ] Goals linked to "Saving" type transactions (contribution tracked automatically)
+- [ ] Goals linked to "Saving" type transactions via `transactions.goal_id` FK (nullable; user assigns when adding/editing a transaction of type 'saving')
+- [ ] `goals.current_amount` auto-updated by trigger/Edge Function when a transaction with matching `goal_id` is inserted, edited, or deleted
 - [ ] "Mark as achieved" button: confetti animation + goal archived
 - [ ] Goals visible on Dashboard (active goals section with progress bars)
 - [ ] Maximum 5 active goals enforced (MVP scope)
@@ -1130,7 +1148,7 @@ E10: QA & Release (US-047 → US-050)
 | 4 | Onboarding + Core Transactions | US-011, US-012, US-013, US-014 (Onboarding), US-015 (Add transaction) |
 | 5 | Transactions | US-016 (List), US-017 (Edit/Delete), US-019 (Search/Filter), US-020 (Categories) |
 | 6 | Bank Integration — Plaid + Budget | US-021 (Plaid), US-026 (Balance cache), US-027 (Dedup), US-028 (Budget config) |
-| 7 | Bank Integration — TrueLayer + Setu | US-022 (TrueLayer), US-023 (Setu AA), US-024 (SMS parsing) |
+| 7 | Bank Integration — TrueLayer + Setu | US-022 (TrueLayer), US-023 (Setu AA), US-024a (SMS listener), US-024b (SMS parser) |
 | 8 | Email Parsing + Reports | US-025 (Gmail), US-029 (Dashboard ring), US-030 (Score), US-031 (Weekly report) |
 | 9 | Reports + Accounts | US-032 (Monthly), US-033 (Monthly summary), US-034 (Annual), US-038 (Net Worth), US-039 (Accounts tab) |
 | 10 | Goals + Export | US-040 (Account detail), US-041 (Goals), US-035 (Excel), US-036 (Drive) |
