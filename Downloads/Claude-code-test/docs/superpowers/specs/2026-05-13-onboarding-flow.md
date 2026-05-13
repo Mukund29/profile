@@ -217,20 +217,24 @@
 
 ---
 
-## Deferred — Not in Onboarding
+## Deferred — Not in Onboarding (MVP)
 
-Everything below is shown at the right contextual moment, never during onboarding:
+Everything below is shown at the right contextual moment, never during onboarding in v1:
 
-| Feature | When shown | Trigger |
-|---------|-----------|---------|
-| SMS permission (Android) | After first manual transaction | "Auto-detect your next bank SMS?" |
-| Gmail / Outlook connect | After 1 day of use | Dashboard nudge card |
-| Monthly income | Day 3 or when user visits Budget screen | Empty state prompt |
-| Budget % targets (50/30/20) | When income is set | "Personalise your budget split →" |
-| Weekly spend limit | When first weekly report is generated | Report screen prompt |
-| Savings goal | After first weekly report | "Ready to set a savings goal?" |
-| Push notifications | When first weekly summary is ready | Contextual permission request |
-| Google Drive | First time user taps Export | OAuth flow at export time |
+| Story | Feature | When shown | Contextual Trigger | Backlog Ref |
+|-------|---------|-----------|-------------------|-------------|
+| US-B05 | SMS permission (Android) | After first manual transaction | "Auto-detect your next bank SMS?" | Promote if SMS auto-capture < 40% at Day-7 |
+| US-B06 | Gmail / Outlook connect | After 1 day of use | Dashboard nudge card | Promote if Gmail connected < 25% at Day-7 (iOS) |
+| US-B02 | Monthly income | Day 3 or when user visits Budget screen | Empty state prompt | Promote if income setup < 50% at Day-7 |
+| US-B03 | Budget % targets (50/30/20) | When income is set | "Personalise your budget split →" | Promote if budget customisation < 30% at Day-30 |
+| US-B04 | Weekly spend limit | When first weekly report is generated | Report screen prompt | Promote if score engagement < 40% at Week-2 |
+| US-B07 | Savings goal | After first weekly report | "Ready to set a savings goal?" | Promote if goals set < 20% at Day-30 |
+| US-B08 | Push notifications | When first weekly summary is ready | Contextual permission request | Promote if opt-in < 40% at Day-14 |
+| US-B09 | Google Drive | First time user taps Export | OAuth flow at export time | Promote if Drive connected < 30% at Day-60 |
+| US-B01 | Currency selection | Auto-detected; Settings | Locale auto-detect | Promote if > 8% change currency in first 7 days |
+| US-B10 | Full profile (last name, photo) | Settings → Profile | Not triggered | Promote if > 15% visit Settings to update profile in 7 days |
+
+**Full backlog story specs:** see `2026-05-13-epics-stories.md` — Epic E11 (Onboarding Backlog)
 
 ---
 

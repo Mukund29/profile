@@ -24,7 +24,9 @@
 | E8 | Settings, Privacy & Compliance | 29 | Sprint 9–10 |
 | E9 | Subscription & Monetisation | 13 | Sprint 3 (early) |
 | E10 | QA, Release & DevOps | 21 | Sprint 10–12 |
-| **Total** | | **299** | **12 Sprints** |
+| E11 | Onboarding Backlog (Deferred Screens) | 29 | v1.1 — post-launch |
+| **Total (MVP)** | | **299** | **12 Sprints** |
+| **Total (incl. backlog)** | | **328** | |
 
 **Sprint duration:** 1 week  
 **Team velocity assumption:** 25–30 SP/sprint (2 developers)
@@ -1154,6 +1156,324 @@ E10: QA & Release (US-047 → US-050)
 | 10 | Goals + Export | US-040 (Account detail), US-041 (Goals), US-035 (Excel), US-036 (Drive) |
 | 11 | Settings + Compliance | US-037 (Export settings), US-042 (Notifications), US-043 (GDPR), US-044 (Subscription mgmt) |
 | 12 | QA + Release | US-047 (Tests), US-048 (App Store), US-049 (Monitoring), US-050 (Performance) |
+
+---
+
+---
+
+## E11 — Onboarding Backlog (Deferred Screens) · v1.1
+
+> **Context:** The original onboarding design had 15 screens (~65–75% estimated drop-off). It was redesigned to 5 screens for MVP to hit the ≥ 75% completion target. The 10 eliminated screens were either deferred to contextual in-app moments (progressive disclosure) or collapsed into existing MVP screens.
+>
+> These stories capture the full screen specifications for **post-launch reconciliation**: once retention data from v1 confirms which contextual triggers are working well and which need a more guided in-onboarding moment, these can be promoted to a revised onboarding flow or dedicated setup wizard.
+>
+> **Status:** BACKLOG · Not scheduled · Target: v1.1 post-launch review
+
+**Definition of Done (for promotion to sprint):** Retention data from ≥ 500 users shows the contextual trigger for this screen achieves < 40% completion rate — meaning the deferred approach is underperforming and a guided in-flow screen is needed.
+
+---
+
+### US-B01 · Onboarding — Currency Selection Screen *(was Screen ~4 in original)*
+**As a** new user  
+**I want** to explicitly choose my base currency during onboarding  
+**So that** I have confidence the app is configured for my financial context from the start
+
+**Story Points:** 3
+
+**Original position:** Between Name+DOB and Bank Connection. Eliminated in MVP because locale auto-detection is accurate ≥ 95% of the time for India/US/UK. Currently: currency shown as a small note at bottom of Screen 3 with "Change later in Settings."
+
+**Trigger to promote:** If > 8% of users change their base currency within 7 days of sign-up (indicates auto-detect is failing or users don't notice the locale note).
+
+**Backlog Screen Spec:**
+- Currency picker: INR · USD · GBP (top 3 large buttons, region flag icons)
+- "Other" option expands full ISO 4217 list
+- Selected currency shown with example formatting: "₹ 1,00,000" / "$100,000" / "£100,000"
+- One-tap selection; no confirm button needed — advance automatically
+- "Why do we ask?" info tooltip explaining reporting currency
+
+**Acceptance Criteria (for when promoted):**
+- [ ] Three primary currency buttons shown with flag + symbol
+- [ ] Selection auto-advances to next screen (no extra tap)
+- [ ] Currency stored in `user_profiles.base_currency`; overrides locale auto-detect
+- [ ] Change tracked in analytics: `onboarding_currency_selected` event
+
+**Dependencies (when promoted):** US-011
+
+---
+
+### US-B02 · Onboarding — Monthly Income Screen *(was Screen ~6 in original)*
+**As a** new user  
+**I want** to enter my monthly income during onboarding  
+**So that** my budget targets and discipline scores are calibrated from day one
+
+**Story Points:** 3
+
+**Original position:** After bank connection, before dashboard. Eliminated in MVP because asking for income before the user has seen any value leads to abandonment. Currently: shown as nudge card on dashboard + prompted on Day 3 / when visiting Budget screen.
+
+**Trigger to promote:** If income setup rate < 50% at Day-7 (users are not responding to contextual nudge).
+
+**Backlog Screen Spec:**
+- Currency-prefixed amount input (numpad, locale-formatted)
+- "Monthly take-home pay (after tax)" label — not gross
+- "Skip for now" link below (not a button — deemphasised)
+- "Why this helps" tooltip: "We use this to calculate your 50/30/20 budget targets"
+- Payslip icon for visual context
+
+**Acceptance Criteria (for when promoted):**
+- [ ] Amount field: currency symbol, numpad, locale separators
+- [ ] "Skip for now" skips to next screen; income remains null
+- [ ] Saved to `user_profiles.monthly_income`
+- [ ] Budget ring on dashboard activates immediately after income entered (no refresh needed)
+
+**Dependencies (when promoted):** US-011 (or after US-012 bank connection)
+
+---
+
+### US-B03 · Onboarding — Budget Split Screen *(was Screen ~7 in original)*
+**As a** new user  
+**I want** to set my Needs / Wants / Savings percentages during onboarding  
+**So that** my discipline score is meaningful from my first full week
+
+**Story Points:** 3
+
+**Original position:** After monthly income. Eliminated because the 50/30/20 default is suitable for new users — customisation before seeing any data often leads to arbitrary choices. Currently: triggered contextually when income is set.
+
+**Trigger to promote:** If < 30% of users customise their budget % within first 30 days (suggests the contextual prompt isn't reaching them effectively).
+
+**Backlog Screen Spec:**
+- Three sliders: Needs / Wants / Savings (default 50/30/20)
+- Real-time validation: sliders sum to 100% (locked constraint)
+- Visual donut preview updates live as sliders move
+- "Use 50/30/20 (recommended)" reset button
+- Colour-coded segments matching dashboard ring colours
+
+**Acceptance Criteria (for when promoted):**
+- [ ] Sliders enforce sum = 100% (drag one → others auto-adjust proportionally)
+- [ ] Live donut preview with INR/USD/GBP absolute amounts based on income entered in US-B02
+- [ ] If income not set: show percentages only (no absolute amounts)
+- [ ] Saved to `user_profiles.budget_needs_pct`, `budget_wants_pct`, `budget_savings_pct`
+
+**Dependencies (when promoted):** US-B02
+
+---
+
+### US-B04 · Onboarding — Weekly Spend Limit Screen *(was Screen ~8 in original)*
+**As a** new user  
+**I want** to set a weekly spend limit during onboarding  
+**So that** I get an early warning when I'm overspending week-by-week
+
+**Story Points:** 2
+
+**Original position:** After budget split. Eliminated because: (1) users don't have a feel for their weekly spend until they've tracked for 2–3 weeks; (2) arbitrary limits set upfront are usually wrong and get ignored. Currently: prompted when first weekly report is generated.
+
+**Trigger to promote:** If weekly discipline score engagement < 40% at Week-2 (users aren't actioning the score because they haven't set a limit).
+
+**Backlog Screen Spec:**
+- Amount input with currency prefix
+- Pre-populated suggestion: (monthly_income × 0.80) ÷ 4 (80% of income, spread weekly)
+- "Skip — I'll set this later" text link
+- "Why weekly?" explanation: "Weekly limits catch overspending 3 weeks earlier than monthly budgets"
+
+**Acceptance Criteria (for when promoted):**
+- [ ] Pre-populated suggestion shown as placeholder (editable)
+- [ ] Skip leaves `user_profiles.weekly_spend_limit` as NULL
+- [ ] Limit immediately active: weekly report progress bar uses this value
+- [ ] Budget ring amber alert threshold = 80% of weekly_spend_limit
+
+**Dependencies (when promoted):** US-B03
+
+---
+
+### US-B05 · Onboarding — SMS Permission Screen (Android) *(was Screen ~9 in original)*
+**As an** Android user  
+**I want** to be asked about SMS access during onboarding with full context  
+**So that** auto-capture starts from my very first day rather than after my first manual transaction
+
+**Story Points:** 3
+
+**Original position:** After bank connection. Eliminated because cold-ask permission acceptance rate is 25–35%; contextual ask (after first manual transaction) achieves ~70%. Currently: prompted after first manual transaction.
+
+**Trigger to promote:** If SMS-based auto-capture rate < 40% at Day-7 for Android India users (contextual trigger isn't converting).
+
+**Backlog Screen Spec:**
+- Full-page explainer with security emphasis: "Your SMS messages never leave your device"
+- Show exactly what FinTrack reads: debit/credit bank alerts only
+- Show what it ignores: personal messages, OTPs, non-bank SMS
+- "Allow SMS access" primary button → system permission dialog
+- "Not now" secondary link → skip to dashboard
+- Trust signal: "On-device parsing only · Zero bank credentials stored"
+
+**Acceptance Criteria (for when promoted):**
+- [ ] Explainer screen shown before Android system permission dialog
+- [ ] System dialog: "Allow FinTrack to read your SMS messages?" — standard Android
+- [ ] On deny: proceeds to dashboard; SMS capture disabled; contextual re-prompt available later from Settings
+- [ ] On allow: SMS listener starts immediately; existing bank SMS from today parsed on first run
+- [ ] Analytics: `onboarding_sms_permission_granted` / `denied` events
+
+**Dependencies (when promoted):** US-012
+
+---
+
+### US-B06 · Onboarding — Gmail/Email Connect Screen *(was Screen ~10 in original)*
+**As a** user (especially iOS)  
+**I want** to connect my Gmail during onboarding  
+**So that** bank transaction emails are captured from day one without waiting for a nudge card
+
+**Story Points:** 3
+
+**Original position:** After bank connection. Eliminated because OAuth permission asks during onboarding (when trust is not established) have low acceptance; Gmail connect after 1 day of use shows better intent. Currently: dashboard nudge card after Day 1.
+
+**Trigger to promote:** If Gmail-connected users < 25% at Day-7 for iOS users (email is the primary auto-capture path for iOS — if adoption is low, value prop is broken).
+
+**Backlog Screen Spec:**
+- iOS-specific message: "Since iPhones can't read SMS, we connect to your email for auto-capture"
+- Android: "Add email as a backup to SMS capture"
+- "Connect Gmail" primary button → Google OAuth (`gmail.readonly` scope only)
+- "Connect Outlook" secondary button
+- "Skip for now" link
+- Security note: "We only read transaction emails. We can't read or send personal emails."
+
+**Acceptance Criteria (for when promoted):**
+- [ ] iOS: "Connect Gmail" shown as recommended primary CTA
+- [ ] Android: "Connect Gmail" shown as optional secondary (SMS is primary)
+- [ ] Gmail OAuth completes inline (Expo WebBrowser); returns to onboarding flow
+- [ ] On success: "Email connected ✓" confirmation inline; proceeds to next screen
+- [ ] On skip: no Gmail access; onboarding continues
+- [ ] OAuth token stored encrypted in Supabase Vault
+
+**Dependencies (when promoted):** US-012
+
+---
+
+### US-B07 · Onboarding — Savings Goal Screen *(was Screen ~11 in original)*
+**As a** new user  
+**I want** to set a savings goal during onboarding  
+**So that** I have a concrete financial target from day one
+
+**Story Points:** 3
+
+**Original position:** Near end of onboarding. Eliminated because users need to understand the app's value (discipline score, reports) before setting goals meaningfully; upfront goals often feel abstract. Currently: prompted after first weekly report.
+
+**Trigger to promote:** If < 20% of users have set a goal at Day-30 (contextual trigger after weekly report isn't reaching enough users).
+
+**Backlog Screen Spec:**
+- Goal name input with suggestions: "Emergency Fund", "Home Deposit", "Vacation", "Education"
+- Target amount input (numpad, currency prefix)
+- Target date picker (optional): calendar or "No deadline"
+- "Skip — set goals later" link
+- Motivational context: "Users with a savings goal save 23% more on average"
+
+**Acceptance Criteria (for when promoted):**
+- [ ] One goal can be created during onboarding (additional goals via Accounts tab)
+- [ ] Goal saved to `goals` table with `status = 'active'`
+- [ ] Goal immediately visible on Dashboard as progress bar
+- [ ] Skip leaves user with 0 active goals; Dashboard shows "Set a savings goal →" nudge card
+
+**Dependencies (when promoted):** US-013
+
+---
+
+### US-B08 · Onboarding — Push Notification Permission Screen *(was Screen ~12 in original)*
+**As a** new user  
+**I want** to be asked about push notifications during onboarding  
+**So that** I receive my weekly discipline score and budget alerts without having to find the setting later
+
+**Story Points:** 2
+
+**Original position:** Near end of onboarding. Eliminated because upfront notification asks without demonstrated value have ~30% acceptance; contextual ask (when first weekly summary is ready) achieves ~65%. Currently: prompted when first weekly summary is ready.
+
+**Trigger to promote:** If notification opt-in rate < 40% at Day-14 (contextual approach underperforming).
+
+**Backlog Screen Spec:**
+- Show 3 example notifications: "Your weekly score: 81/100 · Top spend: Food", "You've used 80% of your Needs budget", "₹1,200 spent at Amazon — was this you?"
+- "Allow Notifications" primary button → iOS/Android system dialog
+- "Maybe later" secondary link
+- No guilt: "You can always enable this in Settings"
+
+**Acceptance Criteria (for when promoted):**
+- [ ] Three example notifications shown as visual mockup (not real notifications)
+- [ ] iOS: system `UNUserNotificationCenter.requestAuthorization` triggered on button tap
+- [ ] Android: `POST_NOTIFICATIONS` permission request (Android 13+)
+- [ ] On deny: proceeds to dashboard; notifications disabled; Settings toggle available
+- [ ] On allow: Expo Push Token registered and stored; first notification scheduled for Sunday
+
+**Dependencies (when promoted):** US-013
+
+---
+
+### US-B09 · Onboarding — Google Drive Connect Screen *(was Screen ~13 in original)*
+**As a** user who wants automated reports  
+**I want** to connect Google Drive during onboarding  
+**So that** my first monthly export is already configured
+
+**Story Points:** 3
+
+**Original position:** Near end of onboarding. Eliminated because Drive is only relevant after the user has generated a report; asking during onboarding is premature. Currently: OAuth triggered on first export tap.
+
+**Trigger to promote:** If Google Drive connection rate < 30% at Day-60 (users are not discovering the export feature through contextual triggers).
+
+**Backlog Screen Spec:**
+- Export value proposition: "Auto-save your monthly report to Google Drive — zero effort"
+- Show preview of exported filename: "FinTrack_May2026_Monthly.xlsx"
+- "Connect Google Drive" primary button → OAuth (`drive.file` scope)
+- "Skip — I'll set this up when I export" link
+- Note: "FinTrack only accesses files it creates. It cannot read your other Drive files."
+
+**Acceptance Criteria (for when promoted):**
+- [ ] `drive.file` scope only — cannot access user's existing Drive files
+- [ ] On success: "Drive connected ✓ · Exports will save to FinTrack Reports folder"
+- [ ] On skip: no Drive access; Export screen shows "Connect Drive" CTA on first use
+- [ ] OAuth token stored encrypted in Supabase Vault
+
+**Dependencies (when promoted):** US-013
+
+---
+
+### US-B10 · Onboarding — Full Profile Screen *(was Screen ~14 in original)*
+**As a** new user  
+**I want** to complete my profile with full name, profile photo, and locale preferences  
+**So that** the app feels personal and correctly configured
+
+**Story Points:** 4
+
+**Original position:** Early in onboarding, after auth. Collapsed in MVP to first-name-only on Screen 3 (name pre-filled from OAuth, currency auto-detected). Currently: base currency editable in Settings → Profile.
+
+**Trigger to promote:** If > 15% of users visit Settings to update their profile in the first 7 days (suggests the minimal profile setup in MVP is leaving them feeling under-configured).
+
+**Backlog Screen Spec:**
+- Full name field (first + last) — pre-filled from OAuth profile
+- Profile photo upload (camera or photo library) — optional
+- Locale confirmation: country + currency (editable, not just auto-detected note)
+- "This is how you'll appear in future shared features (v2)"
+- Continue button
+
+**Acceptance Criteria (for when promoted):**
+- [ ] Last name field added to `user_profiles` schema (migration required)
+- [ ] Profile photo stored in Supabase Storage (not Vault — not sensitive)
+- [ ] Country selector added to `user_profiles`; drives RBI localisation routing
+- [ ] Currency and country used to route India users to `ap-south-1` project
+- [ ] Photo optional; avatar initials shown if skipped
+
+**Dependencies (when promoted):** US-011 (extends Name+DOB screen)
+
+---
+
+## Backlog Promotion Criteria Summary
+
+| Story | Deferred To | Promote If |
+|-------|------------|------------|
+| US-B01 — Currency Selection | Auto-detected; Settings | > 8% users change currency in first 7 days |
+| US-B02 — Monthly Income | Day-3 nudge / Budget screen | Income setup rate < 50% at Day-7 |
+| US-B03 — Budget Split | After income set | Budget customisation < 30% at Day-30 |
+| US-B04 — Weekly Spend Limit | After first weekly report | Discipline score engagement < 40% at Week-2 |
+| US-B05 — SMS Permission (Android) | After first manual transaction | SMS auto-capture < 40% at Day-7 (Android India) |
+| US-B06 — Gmail/Email Connect | After Day-1 nudge card | Gmail connected < 25% at Day-7 (iOS) |
+| US-B07 — Savings Goal | After first weekly report | Goals set < 20% at Day-30 |
+| US-B08 — Push Notification | When first weekly summary ready | Notification opt-in < 40% at Day-14 |
+| US-B09 — Google Drive | On first export tap | Drive connected < 30% at Day-60 |
+| US-B10 — Full Profile | Settings → Profile | > 15% visit Settings to update profile in first 7 days |
+
+**Review cadence:** Evaluate all 10 triggers at **Week 6 post-launch** (first cohort of ~200 users reaches Day-30). Promote stories that breach their threshold into a v1.1 sprint.
 
 ---
 
