@@ -1,0 +1,24 @@
+appId: com.fintrack.app
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Test: Dashboard First Landing (SCR-005)
+# New user — no bank connected, no transactions, no income set
+# ─────────────────────────────────────────────────────────────────────────────
+
+- launchApp:
+    arguments:
+      MOCK_AUTH: "true"
+      MOCK_SCREEN: "dashboard"  # deeplinks directly to /(onboarding)/dashboard
+
+# Greeting
+- assertVisible: "Good morning"
+
+# Net Worth card
+- assertVisible: "Current Net Worth"
+
+# Budget card
+- assertVisible: "Monthly Budget"
+
+# Empty-state CTAs
+- assertVisible: "Set income"
+- assertVisible: "Add first spend"
