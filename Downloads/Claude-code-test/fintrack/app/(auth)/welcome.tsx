@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   heroOverlay: {
-    background: 'transparent',
+    backgroundColor: 'transparent',
     // Simulates a right-side brightening using a semi-transparent layer
     borderLeftWidth: 0,
   },

@@ -106,7 +106,7 @@ function PickerColumn({
   }, []);
 
   const getItemLayout = useCallback(
-    (_: string[] | null | undefined, index: number) => ({
+    (_: ArrayLike<string> | null | undefined, index: number) => ({
       length: ITEM_HEIGHT,
       offset: ITEM_HEIGHT * index,
       index,

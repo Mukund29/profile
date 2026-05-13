@@ -90,7 +90,7 @@ export function useAuth(): AuthState {
       });
       // Only navigate if the component is mounted at the root (no segments yet).
       // This prevents double-redirects when the user lands on a deep link.
-      if (segments.length === 0) {
+      if ((segments as string[]).length === 0) {
         navigate(session);
       }
     });
