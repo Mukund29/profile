@@ -311,7 +311,7 @@ Global table — no user FK. Written by pg_cron hourly.
 | `rate` | numeric(18,8) | Exchange rate |
 | `fetched_at` | timestamptz | UNIQUE on (base, quote, fetched_at) |
 
-**Note:** One API call/hour returns all currency pairs simultaneously. 720 calls/month = within free tier (1,000/mo limit).
+**Note:** One API call per 2 hours returns all currency pairs simultaneously. 372 calls/month — well within the 1,000/mo free tier ceiling.
 
 ---
 
@@ -367,20 +367,128 @@ CREATE INDEX idx_queue_status_created ON parse_queue(status, created_at)
 
 ## Row Level Security Policies
 
+**Full migration:** `supabase/migrations/20260513000001_rls_policies.sql`
+
+### Policy Tier Summary
+
+| Table | RLS Enabled | Client Access | Writer |
+|-------|-------------|---------------|--------|
+| `user_profiles` | ✅ | Read + Write own | Client |
+| `bank_connections` | ✅ | Via safe VIEW only (access_token excluded) | Client |
+| `transactions` | ✅ | Read + Write own | Client + `fintrack_parser` role |
+| `goals` | ✅ | Read + Write own | Client |
+| `categories` | ✅ | Read own + system; Write own only | Client |
+| `user_entitlements` | ✅ | Read own only | RevenueCat webhook (svc key) |
+| `weekly_summaries` | ✅ | Read own only | pg_cron (svc key) |
+| `monthly_summaries` | ✅ | Read own only | pg_cron (svc key) |
+| `balance_history` | ✅ | Read own only | pg_cron (svc key) |
+| `parse_queue` | ✅ | Insert + Read own; no UPDATE/DELETE | Client insert · `fintrack_parser` updates |
+| `parse_failed` | ✅ | **No access** | `fintrack_parser` role |
+| `audit_log` | ✅ | **No access** | Edge Functions (svc key) |
+| `fx_rates` | ✅ | Read all (no user scoping) | pg_cron (svc key) |
+
+### Tier 1 — Full User Read/Write
+
 ```sql
--- All tables follow this pattern:
+-- Pattern: transactions, bank_connections, goals, user_profiles
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can only access their own transactions"
+CREATE POLICY "transactions_own_all"
 ON transactions FOR ALL
-USING (auth.uid() = user_id)
-WITH CHECK (auth.uid() = user_id);
+USING     (auth.uid() = user_id)   -- blocks reads of other users' rows
+WITH CHECK(auth.uid() = user_id);  -- blocks writes with a forged user_id
+```
 
--- Categories: user sees own + system defaults
-CREATE POLICY "Users see own and system categories"
+`WITH CHECK` is critical — without it, a client could INSERT a row with an arbitrary `user_id` (privilege escalation).
+
+### Tier 2 — User Read-Only (Service Key Writes)
+
+```sql
+-- Pattern: user_entitlements, weekly_summaries, monthly_summaries,
+--          balance_history, parse_queue (read + insert only)
+ALTER TABLE user_entitlements ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "user_entitlements_own_read"
+ON user_entitlements FOR SELECT
+USING (auth.uid() = user_id);
+
+-- No INSERT/UPDATE/DELETE policy → any authenticated write is rejected.
+-- Only service key (bypasses RLS) can write.
+```
+
+### Tier 3 — Shared Read + Own Write (categories)
+
+```sql
+ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+
+-- Read own + system defaults (user_id IS NULL = seeded defaults)
+CREATE POLICY "categories_read_own_and_system"
 ON categories FOR SELECT
 USING (user_id = auth.uid() OR user_id IS NULL);
+
+-- Write own custom rows only — system defaults are immutable by clients
+CREATE POLICY "categories_write_own"
+ON categories FOR INSERT, UPDATE, DELETE
+USING     (user_id = auth.uid())
+WITH CHECK(user_id = auth.uid());
 ```
+
+### Tier 4 — No Client Access (audit_log, parse_failed)
+
+```sql
+-- RLS enabled + zero permissive policies = no rows for any authenticated query
+ALTER TABLE audit_log   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE parse_failed ENABLE ROW LEVEL SECURITY;
+-- Intentionally no CREATE POLICY statements.
+```
+
+### Tier 5 — Global Read, No Client Writes (fx_rates)
+
+```sql
+ALTER TABLE fx_rates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "fx_rates_authenticated_read"
+ON fx_rates FOR SELECT
+USING (true);  -- all authenticated users; anon blocked by default
+
+-- No INSERT/UPDATE/DELETE policy → rates are written only by pg_cron (svc key).
+```
+
+### bank_connections_safe View
+
+Clients must never receive the `access_token` column — even Vault-encrypted ciphertext must not be returned (defence-in-depth for Vault key compromise scenarios).
+
+```sql
+CREATE OR REPLACE VIEW public.bank_connections_safe AS
+SELECT
+    id, user_id, provider, institution_name, institution_logo_url,
+    -- access_token intentionally omitted
+    token_expires_at, consent_expires_at, tracking_from,
+    balance_amount, balance_currency, balance_cached_at,
+    last_manual_refresh_at, status, created_at
+FROM public.bank_connections;
+
+GRANT  SELECT ON public.bank_connections_safe TO authenticated;
+REVOKE SELECT ON public.bank_connections      FROM authenticated;
+```
+
+The view is `SECURITY INVOKER` (PostgreSQL default) — `auth.uid()` resolves correctly when queried by an authenticated client, so the RLS policy on the underlying table is honoured.
+
+### fintrack_parser Least-Privilege Role
+
+FastAPI on Railway uses this role instead of the Supabase service key. Scope is column-level:
+
+```sql
+CREATE ROLE fintrack_parser LOGIN;
+
+GRANT INSERT                                   ON transactions  TO fintrack_parser;
+GRANT UPDATE (status, processed_at, retry_count) ON parse_queue TO fintrack_parser;
+GRANT SELECT                                   ON parse_queue   TO fintrack_parser;
+GRANT INSERT                                   ON parse_failed  TO fintrack_parser;
+-- All other tables: access explicitly revoked
+```
+
+If Railway is compromised, the blast radius is bounded to: insert transactions, update parse_queue status, insert parse_failed errors. No reads of user PII, no access to bank tokens, no writes to entitlements.
 
 ---
 
