@@ -1,8 +1,14 @@
 /**
  * Transactions tab — list of all manual + synced transactions.
- * Grouped by date, pull-to-refresh, empty state, FAB opens add-transaction modal.
+ * Features:
+ *  - Search bar with 300ms debounce
+ *  - Filter pills: All / Need / Want / Saving
+ *  - Grouped by date with pull-to-refresh
+ *  - Tap row → transaction-detail screen
+ *  - Long-press row → inline delete confirm
+ *  - FAB + header "+ Add" button open add-transaction modal
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,11 +17,13 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getMockTransactions } from '../../../lib/mock-data';
+import { getMockTransactions, deleteMockTransaction } from '../../../lib/mock-data';
 import { formatAmount } from '../../../lib/money';
 import { Colors } from '../../../constants/colors';
 import { supabase } from '../../../lib/supabase';
@@ -38,6 +46,8 @@ interface DayGroup {
   label: string;
   items: Transaction[];
 }
+
+type FilterType = 'all' | 'need' | 'want' | 'saving';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function formatDayLabel(dateStr: string): string {
@@ -63,37 +73,68 @@ function groupByDate(txns: Transaction[]): DayGroup[] {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  need: Colors.primary,
-  want: '#f59e0b',
+  need:   Colors.primary,
+  want:   '#f59e0b',
   saving: '#22c55e',
 };
 
 const TYPE_LABELS: Record<string, string> = {
-  need: 'Need',
-  want: 'Want',
+  need:   'Need',
+  want:   'Want',
   saving: 'Saving',
 };
 
-// ── Fetch (mock → real Supabase once DB is live) ──────────────────────────────
+const FILTER_OPTIONS: { value: FilterType; label: string }[] = [
+  { value: 'all',    label: 'All' },
+  { value: 'need',   label: 'Needs' },
+  { value: 'want',   label: 'Wants' },
+  { value: 'saving', label: 'Savings' },
+];
+
+// ── Data fetch ─────────────────────────────────────────────────────────────────
 async function fetchTransactions(_userId: string): Promise<Transaction[]> {
   return getMockTransactions();
 }
 
 // ── Row ────────────────────────────────────────────────────────────────────────
-function TxnRow({ item }: { item: Transaction }) {
+interface TxnRowProps {
+  item: Transaction;
+  onPress: () => void;
+  onLongPress: () => void;
+}
+
+function TxnRow({ item, onPress, onLongPress }: TxnRowProps) {
   const typeColor = TYPE_COLORS[item.txn_type] ?? Colors.primary;
   const isExpense = item.txn_type !== 'saving';
 
   return (
-    <TouchableOpacity style={styles.row} activeOpacity={0.7}>
+    <TouchableOpacity
+      style={styles.row}
+      activeOpacity={0.7}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={500}
+    >
       <View style={[styles.iconBadge, { backgroundColor: typeColor + '18' }]}>
         <Text style={styles.iconText}>{item.categories?.icon ?? '📋'}</Text>
       </View>
       <View style={styles.rowMeta}>
         <Text style={styles.rowTitle} numberOfLines={1}>{item.description}</Text>
-        <Text style={styles.rowSub}>
-          {item.categories?.name ?? 'Uncategorised'} · {TYPE_LABELS[item.txn_type] ?? item.txn_type}
-        </Text>
+        <View style={styles.rowSubRow}>
+          <Text style={styles.rowSub} numberOfLines={1}>
+            {item.categories?.name ?? 'Uncategorised'}
+          </Text>
+          <View style={[styles.typeBadge, { backgroundColor: typeColor + '18' }]}>
+            <Text style={[styles.typeBadgeText, { color: typeColor }]}>
+              {TYPE_LABELS[item.txn_type] ?? item.txn_type}
+            </Text>
+          </View>
+          {item.source !== 'manual' && (
+            <View style={styles.sourceBadge}>
+              <Text style={styles.sourceBadgeText}>sync</Text>
+            </View>
+          )}
+        </View>
       </View>
       <Text style={[styles.rowAmount, { color: isExpense ? Colors.onSurface : '#22c55e' }]}>
         {isExpense ? '−' : '+'}{formatAmount(item.amount, item.currency)}
@@ -108,6 +149,12 @@ export default function TransactionsTab() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = React.useState<string | null>(null);
 
+  // Filter & search state
+  const [filter, setFilter] = useState<FilterType>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
@@ -119,12 +166,72 @@ export default function TransactionsTab() {
     staleTime: 30_000,
   });
 
+  // ── Search debounce ──────────────────────────────────────────────────────────
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchQuery(text);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => setDebouncedSearch(text), 300);
+  }, []);
+
+  // ── Filtered + searched transactions ────────────────────────────────────────
+  const filtered = useMemo(() => {
+    let txns = data ?? [];
+    if (filter !== 'all') txns = txns.filter((t) => t.txn_type === filter);
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
+      txns = txns.filter(
+        (t) =>
+          t.description.toLowerCase().includes(q) ||
+          (t.categories?.name ?? '').toLowerCase().includes(q),
+      );
+    }
+    return txns;
+  }, [data, filter, debouncedSearch]);
+
+  const groups = useMemo(() => groupByDate(filtered), [filtered]);
+
   const onRefresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['transactions', userId] });
   }, [queryClient, userId]);
 
-  const groups = React.useMemo(() => groupByDate(data ?? []), [data]);
+  // ── Delete ───────────────────────────────────────────────────────────────────
+  const handleDelete = useCallback(
+    (txn: Transaction) => {
+      Alert.alert(
+        'Delete Transaction',
+        `Delete "${txn.description}"?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                  const { error: dbErr } = await supabase
+                    .from('transactions')
+                    .delete()
+                    .eq('id', txn.id)
+                    .eq('user_id', user.id);
+                  if (dbErr) throw dbErr;
+                } else {
+                  deleteMockTransaction(txn.id);
+                }
+                queryClient.invalidateQueries({ queryKey: ['transactions'] });
+              } catch (e) {
+                console.error('Delete failed:', e);
+                Alert.alert('Error', 'Could not delete transaction.');
+              }
+            },
+          },
+        ],
+      );
+    },
+    [queryClient],
+  );
 
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -137,6 +244,39 @@ export default function TransactionsTab() {
         >
           <Text style={styles.addBtnText}>+ Add</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Search bar */}
+      <View style={styles.searchContainer}>
+        <Text style={styles.searchIcon}>🔍</Text>
+        <TextInput
+          style={styles.searchInput}
+          value={searchQuery}
+          onChangeText={handleSearchChange}
+          placeholder="Search transactions…"
+          placeholderTextColor={Colors.textMuted}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+        />
+      </View>
+
+      {/* Filter pills */}
+      <View style={styles.filterRow}>
+        {FILTER_OPTIONS.map((opt) => {
+          const active = filter === opt.value;
+          return (
+            <TouchableOpacity
+              key={opt.value}
+              style={[styles.filterPill, active && styles.filterPillActive]}
+              onPress={() => setFilter(opt.value)}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.filterPillText, active && styles.filterPillTextActive]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {isLoading ? (
@@ -154,9 +294,15 @@ export default function TransactionsTab() {
         </View>
       ) : groups.length === 0 ? (
         <View style={styles.centered}>
-          <Text style={styles.emptyEmoji}>📋</Text>
-          <Text style={styles.emptyTitle}>No transactions yet</Text>
-          <Text style={styles.emptyBody}>Tap + Add to log your first transaction.</Text>
+          <Text style={styles.emptyEmoji}>{debouncedSearch ? '🔍' : '📋'}</Text>
+          <Text style={styles.emptyTitle}>
+            {debouncedSearch ? 'No results found' : 'No transactions yet'}
+          </Text>
+          <Text style={styles.emptyBody}>
+            {debouncedSearch
+              ? `No transactions match "${debouncedSearch}"`
+              : 'Tap + Add to log your first transaction.'}
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -175,7 +321,17 @@ export default function TransactionsTab() {
             <View style={styles.group}>
               <Text style={styles.groupLabel}>{group.label}</Text>
               {group.items.map((txn) => (
-                <TxnRow key={txn.id} item={txn} />
+                <TxnRow
+                  key={txn.id}
+                  item={txn}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(app)/transaction-detail',
+                      params: { id: txn.id },
+                    } as any)
+                  }
+                  onLongPress={() => handleDelete(txn)}
+                />
               ))}
             </View>
           )}
@@ -194,8 +350,10 @@ export default function TransactionsTab() {
   );
 }
 
+// ── Styles ─────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -218,11 +376,54 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     borderRadius: 8,
   },
-  addBtnText: {
-    fontFamily: 'WorkSans_600SemiBold',
-    fontSize: 13,
-    color: '#ffffff',
+  addBtnText: { fontFamily: 'WorkSans_600SemiBold', fontSize: 13, color: '#ffffff' },
+
+  // Search
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    gap: 8,
   },
+  searchIcon:  { fontSize: 15 },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontFamily: 'WorkSans_400Regular',
+    fontSize: 14,
+    color: Colors.onSurface,
+  },
+
+  // Filter pills
+  filterRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  filterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+  },
+  filterPillActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterPillText:       { fontFamily: 'WorkSans_500Medium', fontSize: 13, color: Colors.textMuted },
+  filterPillTextActive: { color: '#ffffff' },
+
+  // States
   centered: {
     flex: 1,
     alignItems: 'center',
@@ -232,10 +433,10 @@ const styles = StyleSheet.create({
   },
   emptyEmoji: { fontSize: 40 },
   emptyTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 18, color: Colors.onSurface },
-  emptyBody: { fontFamily: 'WorkSans_400Regular', fontSize: 14, color: Colors.textMuted, textAlign: 'center' },
+  emptyBody:  { fontFamily: 'WorkSans_400Regular', fontSize: 14, color: Colors.textMuted, textAlign: 'center' },
   errorEmoji: { fontSize: 40 },
   errorTitle: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: Colors.onSurface },
-  errorBody: { fontFamily: 'WorkSans_400Regular', fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
+  errorBody:  { fontFamily: 'WorkSans_400Regular', fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
   retryBtn: {
     marginTop: 8,
     paddingHorizontal: 20,
@@ -244,8 +445,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   retryText: { fontFamily: 'WorkSans_600SemiBold', fontSize: 14, color: '#ffffff' },
+
+  // List
   listContent: { paddingBottom: 100 },
-  group: { paddingTop: 16 },
+  group:       { paddingTop: 16 },
   groupLabel: {
     fontFamily: 'WorkSans_600SemiBold',
     fontSize: 12,
@@ -255,6 +458,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 4,
   },
+
+  // Row
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -272,23 +477,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconText: { fontSize: 20 },
-  rowMeta: { flex: 1, gap: 2 },
+  iconText:   { fontSize: 20 },
+  rowMeta:    { flex: 1, gap: 3 },
   rowTitle: {
     fontFamily: 'WorkSans_500Medium',
     fontSize: 14,
     color: Colors.onSurface,
   },
+  rowSubRow:  { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   rowSub: {
     fontFamily: 'WorkSans_400Regular',
     fontSize: 12,
     color: Colors.textMuted,
   },
+  typeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  typeBadgeText: { fontFamily: 'WorkSans_600SemiBold', fontSize: 10 },
+  sourceBadge: {
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#e0f2fe',
+  },
+  sourceBadgeText: { fontFamily: 'WorkSans_600SemiBold', fontSize: 10, color: '#0284c7' },
   rowAmount: {
     fontFamily: 'Manrope_600SemiBold',
     fontSize: 14,
     color: Colors.onSurface,
   },
+
+  // FAB
   fab: {
     position: 'absolute',
     bottom: 32,

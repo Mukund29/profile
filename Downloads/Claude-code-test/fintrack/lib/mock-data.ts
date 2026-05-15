@@ -144,3 +144,20 @@ export function addMockTransaction(txn: Omit<MockTransaction, 'id'>): MockTransa
   _transactions = [newTxn, ..._transactions];
   return newTxn;
 }
+
+export function updateMockTransaction(
+  id: string,
+  updates: Partial<Omit<MockTransaction, 'id'>>,
+): MockTransaction | null {
+  let found: MockTransaction | null = null;
+  _transactions = _transactions.map((t) => {
+    if (t.id !== id) return t;
+    found = { ...t, ...updates };
+    return found;
+  });
+  return found;
+}
+
+export function deleteMockTransaction(id: string): void {
+  _transactions = _transactions.filter((t) => t.id !== id);
+}
