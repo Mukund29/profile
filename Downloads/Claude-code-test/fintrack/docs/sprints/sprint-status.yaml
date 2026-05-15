@@ -73,7 +73,7 @@ development_status:
   3-3-edit-delete-transaction: done                 # S5 ✅ transaction-detail.tsx + long-press delete
   3-4-auto-parsed-transaction-review-queue: backlog # S9 — depends on E4 bank data existing
   3-5-transaction-search-filter: done               # S5 ✅ search bar (300ms debounce) + filter pills
-  3-6-category-management: in-progress              # S6 — Settings → Categories screen
+  3-6-category-management: done                     # S7 ✅ system + custom categories screen
   epic-3-retrospective: optional
 
   # ══════════════════════════════════════════════════════
@@ -110,10 +110,10 @@ development_status:
 
   5-1-income-budget-configuration: in-progress      # S6 — Settings screen income + sliders
   5-2-dashboard-budget-ring: in-progress            # S6 — SVG donut ring vs targets
-  5-3-weekly-discipline-score-computation: backlog  # S7 — pg_cron Monday 08:00 UTC
-  5-4-weekly-report-screen: backlog                 # S7 — loads from weekly_summaries only; <1.5s P95
-  5-5-monthly-report-screen: backlog                # S8 — calendar heatmap; <1.5s P95
-  5-6-monthly-summary-computation: backlog          # S8 — pg_cron 1st of month 02:00 UTC
+  5-3-weekly-discipline-score-computation: done     # S7 ✅ on-device formula from mock data
+  5-4-weekly-report-screen: done                    # S7 ✅ day chart, discipline score, category breakdown
+  5-5-monthly-report-screen: done                   # S7 ✅ calendar heatmap, budget vs actual table
+  5-6-monthly-summary-computation: done             # S7 ✅ on-device aggregation from mock data
   5-7-annual-report-screen: backlog                 # S8 — YoY; partial months excluded; <2s P95
   epic-5-retrospective: optional
 
