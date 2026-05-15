@@ -1,0 +1,178 @@
+# generated: 2026-05-15
+# last_updated: 2026-05-15
+# project: FinTrack
+# sprint_plan_version: 1.0 (BMAD roundtable — John/PM, Winston/Architect, Amelia/Engineer, Mary/BA)
+# tracking_system: file-system
+# story_location: docs/sprints/stories
+#
+# BANK INTEGRATION SEQUENCING:
+#   India first (S6) — physical Android device + Indian SIM
+#   UK second  (S10) — TrueLayer sandbox; EAS native build required
+#   US last    (S11) — Plaid sandbox; EAS native build required
+#
+# KEY ARCHITECTURE DECISIONS:
+#   - SheetJS (NOT ExcelJS) — ExcelJS incompatible with Hermes
+#   - FastAPI deferred to S12 — only needed for Gmail; India SMS is on-device
+#   - Dual Supabase routing in S4 — IN → ap-south-1 (RBI requirement)
+#   - dinero.js mandatory from S4 — all monetary amounts bigint/smallest-unit
+#   - dedup (US-027) in S7 — multi-source transactions don't exist before S6
+
+generated: 2026-05-15
+last_updated: 2026-05-15
+project: FinTrack
+sprint_plan_version: "1.0"
+tracking_system: file-system
+story_location: docs/sprints/stories
+
+development_status:
+
+  # ══════════════════════════════════════════════════════
+  # E1 — Foundation & Infrastructure
+  # ══════════════════════════════════════════════════════
+  epic-1: in-progress
+
+  1-1-supabase-project-setup: in-progress          # S3 — DDL + Vault + pg_cron + RLS; client wired, tables missing
+  1-2-fastapi-parsing-microservice-setup: backlog   # S12 — deferred; only needed for Gmail parsing
+  1-3-expo-react-native-project-scaffold: done      # Complete — Expo SDK54, Router, NativeWind, Zustand
+  1-4-cicd-pipeline-environment-management: backlog # S4 — EAS native builds (Plaid/TrueLayer) blocked on this
+  1-5-fx-rate-service: backlog                      # S4 — Edge Function + pg_cron every 2h
+  1-6-offline-queue-foundation: backlog             # S4 — expo-sqlite + SQLCipher; must precede bank sprints
+  epic-1-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E2 — Authentication & Onboarding
+  # ══════════════════════════════════════════════════════
+  epic-2: in-progress
+
+  2-1-google-oauth-sign-in: done                    # UI complete; backend wired to Supabase Auth
+  2-2-apple-sign-in: done                           # UI complete
+  2-3-phone-otp-sign-in: in-progress                # S3 — UI done; backend OTP + SMS Retriever wiring
+  2-4-email-magic-link-sign-in: in-progress         # S3 — UI done; deep link + confirmation UI
+  2-5-onboarding-name-dob: in-progress              # HF-001 live bug: createUserProfile() never called → fix now
+  2-6-onboarding-connect-bank: in-progress          # S4 — India path stub→real; US/UK remain stub until S10/S11
+  2-7-dashboard-onboarding-smart-nudge-cards: in-progress  # HF-002: confetti fires every mount → fix now
+  2-8-session-persistence-biometric-lock: backlog   # S4 — SecureStore wired; biometric lock pending
+  epic-2-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E9 — Subscription & Monetisation  ⚠️ OVERDUE (was S3 in spec)
+  # ══════════════════════════════════════════════════════
+  epic-9: backlog
+
+  9-1-revenuecat-integration-jwt-entitlement: backlog  # S3 — SDK not installed; webhook Edge Function needed
+  9-2-free-trial-paywall: backlog                      # S3 — depends on US-045
+  epic-9-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E3 — Transaction Management  (S5)
+  # ══════════════════════════════════════════════════════
+  epic-3: in-progress
+
+  3-1-add-transaction-manual: done                  # S5 ✅ add-transaction.tsx with mock fallback
+  3-2-transaction-list-view: done                   # S5 ✅ transactions.tsx grouped by date, pull-to-refresh
+  3-3-edit-delete-transaction: done                 # S5 ✅ transaction-detail.tsx + long-press delete
+  3-4-auto-parsed-transaction-review-queue: backlog # S9 — depends on E4 bank data existing
+  3-5-transaction-search-filter: done               # S5 ✅ search bar (300ms debounce) + filter pills
+  3-6-category-management: in-progress              # S6 — Settings → Categories screen
+  epic-3-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E4 — Bank Integration & Auto-Capture
+  # SEQUENCED: India(S6) → UK(S10) → US(S11)
+  # ══════════════════════════════════════════════════════
+  epic-4: backlog
+
+  # S6 — India (physical Android device, real testing)
+  4-3-setu-account-aggregator-connection-india: backlog   # S6 — full Setu AA; ap-south-1; pg_cron 4h pull
+  4-4a-android-sms-permission-listener: backlog           # S6 — READ_SMS; WorkManager; Doze-safe; no raw SMS leaves device
+  4-4b-android-sms-parser-5-bank-regex-engine: backlog    # S6 — HDFC,ICICI,SBI,Axis,Kotak; ≥92% accuracy; corpus tests
+  4-6-balance-auto-refresh-cache: backlog                 # S6 (India portion) — pg_cron daily; "Updated X ago"
+
+  # S10 — UK (TrueLayer sandbox; EAS native build; CI/CD from S4 required)
+  4-2-truelayer-bank-connection-uk: backlog               # S10 — PSD2; 6h polling (no webhooks); token refresh
+  # ⚠️ TrueLayer paid plan needed before S10 (free tier exhausted at ~35 UK users)
+
+  # S11 — US (Plaid sandbox; EAS native build; CI/CD from S4 required)
+  4-1-plaid-bank-connection-us: backlog                   # S11 — Plaid Link SDK; webhooks; Vault token
+
+  # S12 — Gmail (FastAPI needed)
+  4-5-gmail-oauth-email-parsing: backlog                  # S9 — gmail.readonly; FastAPI parse_queue (US-002 S12)
+
+  # S7 — Deduplication (after multi-source transactions exist)
+  4-7-transaction-deduplication: backlog                  # S7 — provider_txn_id UNIQUE + dedup_hash SHA-256; bank API wins
+
+  epic-4-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E5 — Budget, Discipline & Reporting  (S7–S8)
+  # ══════════════════════════════════════════════════════
+  epic-5: in-progress
+
+  5-1-income-budget-configuration: in-progress      # S6 — Settings screen income + sliders
+  5-2-dashboard-budget-ring: in-progress            # S6 — SVG donut ring vs targets
+  5-3-weekly-discipline-score-computation: backlog  # S7 — pg_cron Monday 08:00 UTC
+  5-4-weekly-report-screen: backlog                 # S7 — loads from weekly_summaries only; <1.5s P95
+  5-5-monthly-report-screen: backlog                # S8 — calendar heatmap; <1.5s P95
+  5-6-monthly-summary-computation: backlog          # S8 — pg_cron 1st of month 02:00 UTC
+  5-7-annual-report-screen: backlog                 # S8 — YoY; partial months excluded; <2s P95
+  epic-5-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E6 — Export & Google Drive  (S9–S10)
+  # ══════════════════════════════════════════════════════
+  epic-6: backlog
+
+  6-1-excel-report-generation-on-device: backlog    # S9 — SheetJS (NOT ExcelJS — Hermes incompatible)
+  6-2-google-drive-export: backlog                  # S10
+  6-3-export-settings-auto-export: backlog          # S10
+  epic-6-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E7 — Accounts, Net Worth & Goals  (S8–S9)
+  # ══════════════════════════════════════════════════════
+  epic-7: in-progress
+
+  7-1-net-worth-dashboard-card: in-progress         # S6 — mock net worth on accounts tab
+  7-2-accounts-tab: in-progress                     # S6 — mock bank accounts + balance cache UI
+  7-3-account-detail-reconnect: backlog             # S8
+  7-4-savings-goals: backlog                        # S9
+  epic-7-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E8 — Settings, Privacy & Compliance  (S11)
+  # ══════════════════════════════════════════════════════
+  epic-8: backlog
+
+  8-1-notification-system: backlog                  # S11 — deferred to first weekly summary (not onboarding)
+  8-2-privacy-controls-gdpr-compliance: backlog     # S11 — GDPR Art.17+20, CCPA, RBI, age gate enforcement
+  8-3-subscription-management: backlog              # S11 — RevenueCat cancel flow; grace period UI
+  epic-8-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E10 — QA, Release & DevOps  (S13–S14)
+  # ══════════════════════════════════════════════════════
+  epic-10: backlog
+
+  10-1-test-suite-unit-integration: backlog         # S13
+  10-2-app-store-play-store-submission: backlog     # S14
+  10-3-monitoring-alerting: backlog                 # S13 — Sentry + PostHog + Logflare
+  10-4-performance-validation: backlog              # S13 — Pixel 5 + iPhone 12
+  epic-10-retrospective: optional
+
+  # ══════════════════════════════════════════════════════
+  # E11 — Onboarding Backlog — v1.1 post-launch
+  # Gated on retention metrics (review at Week 6 post-launch)
+  # ══════════════════════════════════════════════════════
+  epic-11: backlog
+
+  11-b01-onboarding-currency-selection-screen: backlog
+  11-b02-onboarding-monthly-income-screen: backlog
+  11-b03-onboarding-budget-split-screen: backlog
+  11-b04-onboarding-weekly-spend-limit-screen: backlog
+  11-b05-onboarding-sms-permission-screen-android: backlog
+  11-b06-onboarding-gmail-email-connect-screen: backlog
+  11-b07-onboarding-savings-goal-screen: backlog
+  11-b08-onboarding-push-notification-permission-screen: backlog
+  11-b09-onboarding-google-drive-connect-screen: backlog
+  11-b10-onboarding-full-profile-screen: backlog
+  epic-11-retrospective: optional
