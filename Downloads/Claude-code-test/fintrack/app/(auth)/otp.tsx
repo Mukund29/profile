@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { verifyPhoneOTP } from '../../lib/auth';
 import { useOnboardingStore } from '../../store/onboarding';
 import { Colors } from '../../constants/colors';
 
@@ -134,36 +135,24 @@ export default function OtpScreen() {
     ]).start();
   }, [shakeAnim]);
 
-  // ── Auto-submit when all 6 digits filled ─────────────────────────────────────
+  // ── Verify OTP against Supabase ───────────────────────────────────────────────
   const handleVerify = useCallback(async (code: string) => {
     setError('');
     setLoading(true);
 
-    try {
-      // Mock verification — replace with real supabase.auth.verifyOtp()
-      // const { error: verifyError } = await supabase.auth.verifyOtp({
-      //   phone: phoneOrEmail,
-      //   token: code,
-      //   type: 'sms',
-      // });
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    const { error: verifyError } = await verifyPhoneOTP(phoneOrEmail, code);
 
-      // Simulate failure for demo with code '000000', success otherwise
-      if (code === '000000') {
-        throw new Error('Invalid verification code. Please try again.');
-      }
-
-      router.replace('/(onboarding)/name-dob');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Verification failed. Please try again.';
-      setError(message);
+    if (verifyError) {
+      setError(verifyError);
       triggerShake();
-      // Clear digits on failure
       setDigits(Array(OTP_LENGTH).fill(''));
       setTimeout(() => inputRefs.current[0]?.focus(), 100);
-    } finally {
       setLoading(false);
+      return;
     }
+
+    // Session established — useAuth SIGNED_IN in _layout.tsx will navigate.
+    // Keep loading=true so the screen stays inert until navigation fires.
   }, [phoneOrEmail, triggerShake]);
 
   // ── OTP input change handler ──────────────────────────────────────────────────

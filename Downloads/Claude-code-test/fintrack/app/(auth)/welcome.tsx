@@ -2,8 +2,9 @@
  * SCR-001 — Welcome / Auth Choice
  * Pixel-perfect match to Stitch Positive Finance welcome_auth_choice mockup.
  */
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   TouchableOpacity,
@@ -15,6 +16,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import * as Google from 'expo-auth-session/providers/google';
+import { signInWithGoogle, signInWithApple } from '../../lib/auth';
 import { useOnboardingStore } from '../../store/onboarding';
 import { Colors } from '../../constants/colors';
 
@@ -107,15 +110,52 @@ function HeroGradient() {
 // ── Screen ─────────────────────────────────────────────────────────────────────
 export default function WelcomeScreen() {
   const { setAuthMethod } = useOnboardingStore();
+  const [authLoading, setAuthLoading] = useState<'google' | 'apple' | null>(null);
+  const [authError, setAuthError] = useState('');
+
+  const [, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+  });
+
+  useEffect(() => {
+    if (!googleResponse) return;
+    if (googleResponse.type === 'success') {
+      const idToken = googleResponse.params.id_token;
+      signInWithGoogle(idToken).then(({ error }) => {
+        setAuthLoading(null);
+        if (error) {
+          setAuthError(error);
+        } else {
+          setAuthMethod('google');
+          router.replace('/(onboarding)/name-dob');
+        }
+      });
+    } else if (googleResponse.type === 'error') {
+      setAuthLoading(null);
+      setAuthError(googleResponse.error?.message ?? 'Google sign-in failed.');
+    } else if (googleResponse.type === 'dismiss' || googleResponse.type === 'cancel') {
+      setAuthLoading(null);
+    }
+  }, [googleResponse]);
 
   const handleGoogle = () => {
-    setAuthMethod('google');
-    router.push('/(onboarding)/name-dob');
+    setAuthError('');
+    setAuthLoading('google');
+    promptGoogleAsync();
   };
 
-  const handleApple = () => {
-    setAuthMethod('apple');
-    router.push('/(onboarding)/name-dob');
+  const handleApple = async () => {
+    setAuthError('');
+    setAuthLoading('apple');
+    const { error } = await signInWithApple();
+    setAuthLoading(null);
+    if (error) {
+      setAuthError(error);
+    } else {
+      setAuthMethod('apple');
+      router.replace('/(onboarding)/name-dob');
+    }
   };
 
   const handlePhoneEmail = () => {
@@ -156,9 +196,16 @@ export default function WelcomeScreen() {
           {/* ── Auth Buttons ─────────────────────────────────────────────── */}
           <View className="w-full gap-stack-md mt-section-gap">
             {/* Google */}
-            <AnimatedButton onPress={handleGoogle} style={styles.googleButton}>
+            <AnimatedButton
+              onPress={handleGoogle}
+              style={[styles.googleButton, authLoading ? { opacity: 0.7 } : {}]}
+            >
               <View style={styles.googleButtonInner} className="border-border-light">
-                <GoogleIcon />
+                {authLoading === 'google' ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <GoogleIcon />
+                )}
                 <Text style={styles.googleButtonText} className="text-on-surface">
                   Continue with Google
                 </Text>
@@ -166,12 +213,24 @@ export default function WelcomeScreen() {
             </AnimatedButton>
 
             {/* Apple */}
-            <AnimatedButton onPress={handleApple} style={styles.appleButton}>
+            <AnimatedButton
+              onPress={handleApple}
+              style={[styles.appleButton, authLoading ? { opacity: 0.7 } : {}]}
+            >
               <View style={styles.appleButtonInner}>
-                <Text style={styles.appleIcon}></Text>
+                {authLoading === 'apple' ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={styles.appleIcon}></Text>
+                )}
                 <Text style={styles.appleButtonText}>Continue with Apple</Text>
               </View>
             </AnimatedButton>
+
+            {/* Error */}
+            {!!authError && (
+              <Text style={styles.authError}>{authError}</Text>
+            )}
 
             {/* Phone / Email fallback */}
             <View className="items-center mt-4">
@@ -396,6 +455,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     color: '#ffffff',
+  },
+
+  // Auth error
+  authError: {
+    fontSize: 13,
+    color: Colors.destructiveRed,
+    textAlign: 'center',
+    paddingHorizontal: 8,
   },
 
   // Phone/email link

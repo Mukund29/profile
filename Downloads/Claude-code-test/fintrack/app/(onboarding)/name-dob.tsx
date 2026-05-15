@@ -31,6 +31,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useOnboardingStore } from '../../store/onboarding';
 import { Colors } from '../../constants/colors';
+import { createUserProfile } from '../../lib/auth';
+import { supabase } from '../../lib/supabase';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -203,6 +205,7 @@ export default function NameDobScreen() {
   const [isFocused, setIsFocused] = useState(false);
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   // Default DOB: 1 January 1995
   const [dayIndex, setDayIndex] = useState(0);    // Day 01
@@ -223,11 +226,11 @@ export default function NameDobScreen() {
     setTimeout(() => setToastVisible(false), 3000);
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!firstName.trim()) return;
 
     const day = parseInt(DAYS[dayIndex], 10);
-    const month = monthIndex; // 0-indexed
+    const month = monthIndex;
     const year = parseInt(YEARS[yearIndex], 10);
 
     const dob = new Date(year, month, day);
@@ -240,12 +243,34 @@ export default function NameDobScreen() {
       return;
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      showToast('Session expired. Please sign in again.');
+      return;
+    }
+
+    setIsLoading(true);
+    const baseCurrency = regionCode === 'US' ? 'USD' : regionCode === 'GB' ? 'GBP' : 'INR';
+    const { error } = await createUserProfile({
+      userId: user.id,
+      displayName: firstName.trim(),
+      dateOfBirth: dob,
+      baseCurrency,
+      locale: locales[0]?.languageTag ?? 'en-IN',
+    });
+    setIsLoading(false);
+
+    if (error) {
+      showToast(error);
+      return;
+    }
+
     setDisplayName(firstName.trim());
     setDateOfBirth(dob);
     router.push('/(onboarding)/connect-bank');
   };
 
-  const isValid = firstName.trim().length > 0;
+  const isValid = firstName.trim().length > 0 && !isLoading;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
@@ -351,10 +376,12 @@ export default function NameDobScreen() {
             <TouchableOpacity
               style={[styles.continueButton, !isValid && styles.continueButtonDisabled]}
               onPress={handleContinue}
-              disabled={!isValid}
+              disabled={!isValid || isLoading}
               activeOpacity={0.85}
             >
-              <Text style={styles.continueButtonText}>Continue</Text>
+              <Text style={styles.continueButtonText}>
+                {isLoading ? 'Saving...' : 'Continue'}
+              </Text>
             </TouchableOpacity>
           </Animated.View>
 

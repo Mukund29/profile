@@ -10,6 +10,8 @@ export default function AuthLayout() {
       <Stack.Screen name="welcome" />
       <Stack.Screen name="phone-email" />
       <Stack.Screen name="otp" />
+      <Stack.Screen name="check-email" />
+      <Stack.Screen name="callback" options={{ animation: 'fade' }} />
     </Stack>
   );
 }

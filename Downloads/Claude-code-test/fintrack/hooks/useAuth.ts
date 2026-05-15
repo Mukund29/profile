@@ -6,8 +6,8 @@
  *                                        else go to (onboarding)/name-dob
  *   SIGNED_OUT → (auth)/welcome
  */
-import { useEffect, useState, useCallback } from 'react';
-import { useRouter, useSegments } from 'expo-router';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useRouter, useSegments, useRootNavigationState } from 'expo-router';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
@@ -20,12 +20,25 @@ interface AuthState {
 export function useAuth(): AuthState {
   const router = useRouter();
   const segments = useSegments();
+  const navigationState = useRootNavigationState();
+  const isReady = !!navigationState?.key;
 
   const [state, setState] = useState<AuthState>({
     user: null,
     session: null,
     loading: true,
   });
+
+  // Holds a navigation action to fire once the navigator is ready.
+  const pendingNav = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (isReady && pendingNav.current) {
+      const fn = pendingNav.current;
+      pendingNav.current = null;
+      fn();
+    }
+  }, [isReady]);
 
   // ------------------------------------------------------------------
   // Helpers
@@ -60,20 +73,27 @@ export function useAuth(): AuthState {
    */
   const navigate = useCallback(
     async (session: Session | null) => {
-      if (!session) {
-        router.replace('/(auth)/welcome');
-        return;
-      }
+      const doNav = async () => {
+        if (!session) {
+          router.replace('/(auth)/welcome');
+          return;
+        }
+        const profileComplete = await hasCompletedProfile(session.user.id);
+        if (profileComplete) {
+          router.replace('/(app)/(tabs)/' as any);
+        } else {
+          router.replace('/(onboarding)/name-dob');
+        }
+      };
 
-      const profileComplete = await hasCompletedProfile(session.user.id);
-
-      if (profileComplete) {
-        router.replace('/(app)/dashboard');
+      if (isReady) {
+        doNav();
       } else {
-        router.replace('/(onboarding)/name-dob');
+        // Navigator not mounted yet — defer until ready.
+        pendingNav.current = doNav;
       }
     },
-    [router, hasCompletedProfile]
+    [router, hasCompletedProfile, isReady]
   );
 
   // ------------------------------------------------------------------
@@ -81,41 +101,27 @@ export function useAuth(): AuthState {
   // ------------------------------------------------------------------
 
   useEffect(() => {
-    // Load the initial session from AsyncStorage (non-blocking).
+    // Populate state from the persisted session — app/index.tsx handles the
+    // initial redirect, so no navigation here.
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setState({
-        user: session?.user ?? null,
-        session,
-        loading: false,
-      });
-      // Only navigate if the component is mounted at the root (no segments yet).
-      // This prevents double-redirects when the user lands on a deep link.
-      if ((segments as string[]).length === 0) {
-        navigate(session);
-      }
+      setState({ user: session?.user ?? null, session, loading: false });
     });
 
     // Real-time listener — fires on sign-in, sign-out, token refresh.
+    // These events fire AFTER the navigator is mounted, so navigation is safe.
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setState({
-        user: session?.user ?? null,
-        session,
-        loading: false,
-      });
+      setState({ user: session?.user ?? null, session, loading: false });
 
       if (_event === 'SIGNED_IN') {
         navigate(session);
       } else if (_event === 'SIGNED_OUT') {
         router.replace('/(auth)/welcome');
       }
-      // TOKEN_REFRESHED, USER_UPDATED — update state only, no navigation.
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
