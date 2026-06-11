@@ -17,8 +17,8 @@ I build AI-driven products — from legal intelligence to autonomous marketing a
 ## 🏆 GitHub Trophies
 ![](https://github-profile-trophy.vercel.app/?username=mukund29&theme=tokyonight&no-frame=false&no-bg=true&margin-w=4)
 
-### ✍️ Random Dev Quote
-![](https://quotes-github-readme.vercel.app/api?type=horizontal&theme=tokyonight)
+### 🧭 My Code Philosophy
+> _"The best code is not the cleverest, the most optimized, or the most mature — it is the simplest to read, to understand, and to debug."_
 
 ---
 [![](https://visitcount.itsvg.in/api?id=mukund29&icon=0&color=0)](https://visitcount.itsvg.in)
